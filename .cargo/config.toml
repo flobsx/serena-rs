@@ -1,14 +1,21 @@
-# Build configuration for Serena.rs
+# Serena.rs — Build configuration
 #
-# NOTE: This .cargo/config.toml is set up for the Hermes build container.
-# On a standard system, just run: sudo apt install build-essential libssl-dev pkg-config
-# Then: cargo build
-
+# Default target: x86_64-unknown-linux-musl
+# This produces a fully statically-linked binary with no glibc
+# dependency, so it runs on ANY Linux distro regardless of libc version.
+#
+# To build:  cargo build --release
+# To test:   cargo test --workspace --all-targets
+#
+# If you prefer the glibc target for local development:
+#   cargo build --release --target x86_64-unknown-linux-gnu
+#
 [build]
-rustflags = []
+target = "x86_64-unknown-linux-musl"
 
-[env]
-# OpenSSL paths for the Hermes container (extracted debs in /tmp/gcc-prefix)
-# Remove these on a normal system with libssl-dev installed
-OPENSSL_LIB_DIR = "/tmp/gcc-prefix/usr/lib/x86_64-linux-gnu"
-OPENSSL_INCLUDE_DIR = "/tmp/gcc-prefix/usr/include"
+# For the musl target on a fresh Ubuntu/Debian, you may need:
+#   sudo apt install build-essential libssl-dev pkg-config
+#
+# The zig linker (used via cargo-zigbuild) is not required for local dev
+# if you use the glibc target above, but is used in CI to produce the
+# distributable musl binary.
