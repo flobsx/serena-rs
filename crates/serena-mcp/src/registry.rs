@@ -51,6 +51,11 @@ impl ToolRegistry {
         self.tools.get(name)
     }
 
+    /// Get a tool handler by name (alias for compatibility).
+    pub fn get_handler(&self, name: &str) -> Option<&ToolHandler> {
+        self.get(name)
+    }
+
     /// List all registered tool names.
     pub fn list_tools(&self) -> Vec<&str> {
         self.tools.keys().copied().collect()

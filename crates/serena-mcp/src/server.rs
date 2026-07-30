@@ -18,6 +18,7 @@ use rmcp::{
 };
 
 /// The Serena MCP server.
+#[derive(Clone)]
 pub struct McpServer {
     /// Tool registry with all registered handlers
     registry: Arc<Mutex<ToolRegistry>>,
