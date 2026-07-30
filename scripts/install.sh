@@ -116,26 +116,29 @@ download_binary() {
 
   local release_tag
   # Get latest release tag via gh or API
+  # Try gh (handles auth for both public and private)
   if command -v gh >/dev/null 2>&1; then
-    # gh handles auth automatically for both public and private repos
     info "Downloading Serena.rs for ${platform} via GitHub CLI…"
-    gh release download --repo "$REPO" --pattern "serena-${platform}.tar.gz" --dir "$tmp_dir"
-  else
-    # Try curl with GitHub token (from gh or env)
-    local token=""
-    if command -v gh >/dev/null 2>&1; then
-      token="$(gh auth token 2>/dev/null || true)"
-    fi
-    : "${GITHUB_TOKEN:=${token:-}}"
-
-    local url="https://github.com/${REPO}/releases/download/v0.1.0/serena-${platform}.tar.gz"
-    info "Downloading Serena.rs for ${platform} via curl…"
-
-    if [ -n "$GITHUB_TOKEN" ]; then
-      curl -fsL -H "Authorization: token $GITHUB_TOKEN" "$url" -o "$tmp_dir/serena.tar.gz"
+    if gh release download --repo "$REPO" --pattern "serena-${platform}.tar.gz" --dir "$tmp_dir" 2>/dev/null; then
+      :  # success
     else
-      # Public repos only — will 404 on private
-      curl -fsL "$url" -o "$tmp_dir/serena.tar.gz"
+      warn "gh download failed — trying direct curl…"
+    fi
+  fi
+
+  # Fallback: direct curl (public repo)
+  if [ ! -f "$tmp_dir/serena.tar.gz" ]; then
+    # try to get the latest release tag
+    local tag="v0.1.0"
+    local api_tag
+    api_tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') || true
+    [ -n "$api_tag" ] && tag="$api_tag"
+    local url="https://github.com/${REPO}/releases/download/${tag}/serena-${platform}.tar.gz"
+    info "Downloading from ${url}…"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$url" -o "$tmp_dir/serena.tar.gz"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q "$url" -O "$tmp_dir/serena.tar.gz"
     fi
   fi
 
