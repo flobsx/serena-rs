@@ -13,7 +13,7 @@
 #
 set -euo pipefail
 
-REPO="maya-bsx/serena-rs"
+REPO="flobsx/serena-rs"
 VERSION="${1:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 CONFIGURE_OPENCODE="${CONFIGURE_OPENCODE:-yes}"
