@@ -78,6 +78,8 @@ struct ClientState {
     capabilities: Option<ServerCapabilities>,
     /// Map of pending request IDs → response oneshot senders
     pending: HashMap<u64, oneshot::Sender<lsp_server::Response>>,
+    /// Diagnostics published by the server, keyed by document URI
+    diagnostics: HashMap<Url, Vec<Diagnostic>>,
     /// Whether the client has been initialized
     initialized: bool,
     /// Whether a shutdown has been initiated
@@ -94,6 +96,7 @@ impl LspClient {
                 child: None,
                 capabilities: None,
                 pending: HashMap::new(),
+                diagnostics: HashMap::new(),
                 initialized: false,
                 shutting_down: false,
             })),
@@ -462,6 +465,55 @@ impl LspClient {
         }
     }
 
+    /// Request a rename for the symbol at the given position.
+    pub async fn rename(&self, uri: &Url, position: Position, new_name: &str) -> Result<Option<WorkspaceEdit>> {
+        let params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            new_name: new_name.to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        self.request::<Option<WorkspaceEdit>>("textDocument/rename", params).await
+    }
+
+    /// Request document formatting.
+    pub async fn formatting(&self, uri: &Url, options: FormattingOptions) -> Result<Vec<TextEdit>> {
+        let params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        let result: Option<Vec<TextEdit>> = self.request("textDocument/formatting", params).await?;
+        Ok(result.unwrap_or_default())
+    }
+
+    /// Execute a workspace command.
+    pub async fn execute_command(&self, command: &str, arguments: Vec<serde_json::Value>) -> Result<Option<serde_json::Value>> {
+        let params = ExecuteCommandParams {
+            command: command.to_string(),
+            arguments,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+        self.request("workspace/executeCommand", params).await
+    }
+
+    /// Get stored diagnostics for a given document URI.
+    ///
+    /// Diagnostics are collected from `textDocument/publishDiagnostics` notifications
+    /// sent by the language server after opening a document.
+    pub async fn get_diagnostics(&self, uri: &Url) -> Vec<lsp_types::Diagnostic> {
+        let s = self.state.lock().await;
+        s.diagnostics.get(uri).cloned().unwrap_or_default()
+    }
+
+    /// Clear stored diagnostics for all documents.
+    pub async fn clear_diagnostics(&self) {
+        let mut s = self.state.lock().await;
+        s.diagnostics.clear();
+    }
+
     // ========================================================================
     // Internal JSON-RPC helpers
     // ========================================================================
@@ -593,6 +645,8 @@ impl LspClient {
                                     count = params.diagnostics.len(),
                                     "Received diagnostics",
                                 );
+                                let mut s = state.blocking_lock();
+                                s.diagnostics.insert(params.uri, params.diagnostics);
                             }
                         }
                         _ => {

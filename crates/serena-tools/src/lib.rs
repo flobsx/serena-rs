@@ -4,10 +4,11 @@
 //! to coding agents. Organized by category.
 
 pub mod file_tools;
-pub mod symbol_tools;
 pub mod memory_tools;
-pub mod config_tools;
+pub mod search_tools;
 pub mod shell_tools;
+pub mod symbol_tools;
+pub mod config_tools;
 pub mod workflow_tools;
 
 pub mod prelude;

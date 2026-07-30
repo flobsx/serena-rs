@@ -17,3 +17,7 @@ futures = "0.3"
 serena-core = { path = "../serena-core" }
 serena-tools = { path = "../serena-tools" }
 serena-util = { path = "../serena-util" }
+
+[dev-dependencies]
+rmcp = { version = "0.8", features = ["client", "transport-async-rw"] }
+tokio = { version = "1", features = ["full"] }

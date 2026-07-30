@@ -17,4 +17,8 @@ serena-editor = { path = "../serena-editor" }
 serena-project = { path = "../serena-project" }
 serena-memory = { path = "../serena-memory" }
 serena-config = { path = "../serena-config" }
-serena-util = { path = "../serena-util" }
+serena-util       = { path = "../serena-util" }
+
+[dev-dependencies]
+tempfile = "3"
+serial_test = "3"
