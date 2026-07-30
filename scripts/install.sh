@@ -9,15 +9,21 @@
 #   git clone https://github.com/flobsx/serena-rs.git
 #   cd serena-rs && bash scripts/install.sh
 #
-#   # Via curl if the repo is public:
-#   curl -fsSL https://raw.githubusercontent.com/flobsx/serena-rs/main/scripts/install.sh | sh
+#   # Via curl (public repos only):
+#   curl -fsSL https://raw.githubusercontent.com/flobsx/serena-rs/main/scripts/install.sh | bash
 #
 # What it does:
 #   1. Builds from source (preferred) OR downloads a pre-built binary
 #   2. Installs to ~/.local/bin/serena
 #   3. Optionally configures OpenCode MCP
 #
-set -euo pipefail
+# NOTE: if you pipe to `sh` and get "Illegal option -o pipefail",
+# re-run with `| bash` instead. This script prefers bash for pipefail.
+if [ -n "${BASH_VERSION:-}" ]; then
+  set -euo pipefail
+else
+  set -eu
+fi
 
 REPO="flobsx/serena-rs"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
@@ -216,10 +222,13 @@ main() {
   fi
 
   # PATH hint
-  if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-    info "Add ${INSTALL_DIR} to your PATH (~/.bashrc / ~/.zshrc):"
-    echo "  export PATH=\"\$PATH:${INSTALL_DIR}\""
-  fi
+  case ":$PATH:" in
+    *":${INSTALL_DIR}:"*) ;;
+    *)
+      info "Add ${INSTALL_DIR} to your PATH (~/.bashrc / ~/.zshrc):"
+      echo "  export PATH=\"\$PATH:${INSTALL_DIR}\""
+      ;;
+  esac
 
   if [ "$CONFIGURE_OPENCODE" = "yes" ]; then
     configure_opencode
