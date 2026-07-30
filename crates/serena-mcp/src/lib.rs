@@ -6,6 +6,7 @@
 pub mod server;
 pub mod transport;
 pub mod registry;
+pub mod error;
 
 pub use server::McpServer;
 pub use transport::Transport;

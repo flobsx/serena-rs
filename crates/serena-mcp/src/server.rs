@@ -3,11 +3,19 @@
 //! Manages the MCP protocol lifecycle: initialization, tool listing,
 //! tool execution, and transport.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
 
+use crate::error::McpErrorExt;
 use crate::registry::{ToolHandler, ToolRegistry};
+
+use rmcp::model::*;
+use rmcp::{
+    RoleServer, ServerHandler,
+    service::RequestContext,
+};
 
 /// The Serena MCP server.
 pub struct McpServer {
@@ -37,20 +45,19 @@ impl McpServer {
     }
 
     /// Run the MCP server over stdio transport.
-    pub async fn run_stdio(&self) {
+    pub async fn run_stdio(self) {
         info!("Starting MCP server (stdio transport)");
 
-        let tools = {
-            let reg = self.registry.lock().await;
-            reg.mcp_tool_list()
-        };
+        let count = self.tool_count().await;
+        info!(count, "MCP server ready");
 
-        info!(count = tools.len(), "MCP server ready");
+        // Build stdio transport: stdin + stdout
+        // (tokio::io::Stdin, tokio::io::Stdout) implements IntoTransport
+        let transport = (tokio::io::stdin(), tokio::io::stdout());
 
-        // Keep running until interrupted (actual MCP protocol handling
-        // via rmcp will be added in a future iteration)
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+        // Serve the MCP protocol — this blocks until the client disconnects
+        if let Err(e) = rmcp::serve_server(self, transport).await {
+            info!(error = %e, "MCP server stopped");
         }
     }
 
@@ -70,6 +77,142 @@ impl Default for McpServer {
         Self::new()
     }
 }
+
+// =============================================================================
+// rmcp ServerHandler implementation
+// =============================================================================
+
+impl ServerHandler for McpServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            protocol_version: ProtocolVersion::default(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
+            server_info: Implementation {
+                name: "serena-rs".to_string(),
+                title: Some("Serena.rs — MCP Toolkit".to_string()),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                icons: None,
+                website_url: None,
+            },
+            instructions: Some(
+                "Serena.rs — MCP protocol server for coding agents. "
+                    .to_string()
+            ),
+        }
+    }
+
+    async fn initialize(
+        &self,
+        request: InitializeRequestParam,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, rmcp::ErrorData> {
+        info!(
+            client = %request.client_info.name,
+            version = %request.client_info.version,
+            protocol = %request.protocol_version,
+            "Client initializing"
+        );
+        if context.peer.peer_info().is_none() {
+            context.peer.set_peer_info(request);
+        }
+        Ok(self.get_info())
+    }
+
+    async fn on_initialized(
+        &self,
+        _context: rmcp::service::NotificationContext<RoleServer>,
+    ) {
+        info!("Client initialized — ready to serve requests");
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, rmcp::ErrorData> {
+        let tools = self.registry.lock().await.mcp_tool_list();
+        let rmcp_tools: Vec<Tool> = tools.into_iter().map(convert_tool_def).collect();
+        Ok(ListToolsResult::with_all_items(rmcp_tools))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        dispatch_tool_call(&self.registry, &request.name, request.arguments).await
+    }
+}
+
+// =============================================================================
+// Tool dispatch
+// =============================================================================
+
+/// Dispatch a tool call by name, looking up the handler in the registry.
+///
+/// Returns an MCP `CallToolResult` — successful or error.
+pub async fn dispatch_tool_call(
+    registry: &Arc<Mutex<ToolRegistry>>,
+    name: &str,
+    arguments: Option<JsonObject>,
+) -> Result<CallToolResult, rmcp::ErrorData> {
+    let reg = registry.lock().await;
+    let handler = reg.get(name).ok_or_else(|| rmcp::ErrorData::tool_not_found(name))?;
+
+    let params_value = match arguments {
+        Some(map) => serde_json::Value::Object(map),
+        None => serde_json::json!({}),
+    };
+
+    match (handler.handler)(params_value).await {
+        Ok(result) => {
+            let text = if result.is_object() || result.is_array() {
+                serde_json::to_string_pretty(&result)
+                    .unwrap_or_else(|_| result.to_string())
+            } else {
+                result.to_string()
+            };
+            Ok(CallToolResult::success(vec![Content::text(text)]))
+        }
+        Err(err_msg) => {
+            Ok(CallToolResult::error(vec![Content::text(err_msg)]))
+        }
+    }
+}
+
+// =============================================================================
+// Conversion helpers
+// =============================================================================
+
+/// Convert our `McpToolDefinition` into rmcp's `Tool`.
+fn convert_tool_def(def: crate::registry::McpToolDefinition) -> Tool {
+    let schema_value = def.input_schema;
+    let schema_map = match schema_value {
+        serde_json::Value::Object(map) => map,
+        other => {
+            // Wrap non-object schemas
+            let mut map = serde_json::Map::new();
+            map.insert("schema".to_string(), other);
+            map
+        }
+    };
+
+    Tool {
+        name: Cow::Owned(def.name.to_string()),
+        title: None,
+        description: Some(Cow::Borrowed(def.description)),
+        input_schema: Arc::new(schema_map),
+        output_schema: None,
+        annotations: None,
+        icons: None,
+    }
+}
+
+// =============================================================================
+// Built-in tool registration
+// =============================================================================
 
 /// Register all built-in tools with the server.
 pub async fn register_builtin_tools(server: &McpServer) {
@@ -197,6 +340,10 @@ async fn register_symbol_tools(server: &McpServer) {
     info!("Symbol tools registered");
 }
 
+// =============================================================================
+// Tests
+// =============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,5 +393,100 @@ mod tests {
 
         let server = McpServer::with_registry(registry);
         assert_eq!(server.tool_count().await, 1);
+    }
+
+    // -- ServerHandler tests --
+
+    #[tokio::test]
+    async fn test_get_info_returns_serena_name() {
+        let server = McpServer::new();
+        let info: ServerInfo = server.get_info();
+        assert_eq!(info.server_info.name, "serena-rs");
+        assert_eq!(info.server_info.version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn test_get_info_has_tools_capability() {
+        let server = McpServer::new();
+        let info = server.get_info();
+        assert!(
+            info.capabilities.tools.is_some(),
+            "ServerInfo should advertise tools capability"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_info_has_instructions() {
+        let server = McpServer::new();
+        let info = server.get_info();
+        assert!(
+            info.instructions.is_some(),
+            "ServerInfo should have instructions"
+        );
+        let instr = info.instructions.unwrap();
+        assert!(instr.contains("Serena"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_tool_def_to_rmcp_conversion() {
+        let server = McpServer::new();
+        server.register_tool(ToolHandler {
+            name: "my_tool",
+            description: "Does something useful",
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "input": { "type": "string" }
+                },
+                "required": ["input"]
+            }),
+            handler: Box::new(|_| Box::pin(async move { Ok(serde_json::json!({"ok": true})) })),
+        }).await;
+
+        let tools = server.tool_list().await;
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "my_tool");
+        assert_eq!(tools[0].description, "Does something useful");
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_integration_via_registry() {
+        let server = McpServer::new();
+        server.register_tool(ToolHandler {
+            name: "echo",
+            description: "Echo input",
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "msg": { "type": "string" }
+                }
+            }),
+            handler: Box::new(|params| {
+                Box::pin(async move { Ok(params) })
+            }),
+        }).await;
+
+        // Test via internal dispatch helper
+        let result = dispatch_tool_call(
+            &server.registry,
+            "echo",
+            serde_json::json!({"msg": "hello"}).as_object().cloned(),
+        ).await;
+
+        assert!(result.is_ok(), "dispatch_tool_call should succeed: {:?}", result.err());
+        let call_result = result.unwrap();
+        assert_eq!(call_result.is_error, Some(false), "should not be an error");
+    }
+
+    #[tokio::test]
+    async fn test_call_tool_not_found() {
+        let server = McpServer::new();
+        let result = dispatch_tool_call(
+            &server.registry,
+            "nonexistent",
+            None,
+        ).await;
+
+        assert!(result.is_err(), "calling nonexistent tool should error");
     }
 }

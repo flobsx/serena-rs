@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+mod commands;
+
 /// Serena.rs — MCP Toolkit for Coding Agents
 #[derive(Parser, Debug)]
 #[command(name = "serena", version, about)]
@@ -37,22 +39,11 @@ async fn main() {
 
     match cli.command {
         Commands::StartMcpServer { project, transport } => {
-            let server = serena_mcp::server::McpServer::new();
-
-            // Register all built-in tools (symbol, file, memory, etc.)
-            tracing::info!("Registering built-in tools...");
-            serena_mcp::server::register_builtin_tools(&server).await;
-
-            tracing::info!(
-                "Starting MCP server (transport={transport}, tools={})",
-                server.tool_count().await,
-            );
-
-            if let Some(p) = &project {
-                tracing::info!("  project: {p}");
+            if let Err(e) = commands::mcp::execute(project.as_deref(), &transport).await {
+                tracing::error!(error = %e, "Failed to start MCP server");
+                eprintln!("{e}");
+                std::process::exit(1);
             }
-
-            server.run_stdio().await;
         }
         Commands::Init { path } => {
             tracing::info!("Initializing Serena project at: {path}");

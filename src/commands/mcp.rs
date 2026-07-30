@@ -27,25 +27,19 @@ pub async fn execute(project: Option<&str>, transport: &str) -> Result<(), McpCo
         }
     }
 
-    // Initialize tool registry
-    let registry = build_tool_registry();
+    // Create server and register all built-in tools
+    let server = serena_mcp::McpServer::new();
+    serena_mcp::server::register_builtin_tools(&server).await;
 
-    // Start the MCP server via serena-mcp
-    let server = serena_mcp::McpServer::with_registry(registry);
+    tracing::info!(
+        tools = %server.tool_count().await,
+        "MCP server starting"
+    );
+
+    // Start the MCP server via serena-mcp (blocks until client disconnects)
     server.run_stdio().await;
 
     Ok(())
-}
-
-/// Build the tool registry with all available tools.
-fn build_tool_registry() -> serena_mcp::ToolRegistry {
-    let mut registry = serena_mcp::ToolRegistry::new();
-
-    // Register tools from serena-tools crate
-    // TODO: wire individual tool registrations when serena-tools is implemented
-    tracing::info!("tool registry initialized (stub: tools not yet wired)");
-
-    registry
 }
 
 #[derive(Debug, PartialEq)]
@@ -125,5 +119,22 @@ mod tests {
             }
             other => panic!("expected NotADirectory, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_command_registers_builtin_tools() {
+        // Verify the same wiring path used by execute() correctly registers tools.
+        // This excercises the serena_mcp::server::register_builtin_tools path.
+        let server = serena_mcp::McpServer::new();
+        serena_mcp::server::register_builtin_tools(&server).await;
+
+        let count = server.tool_count().await;
+        assert!(count >= 3, "Expected at least 3 built-in tools, got {count}");
+
+        let tools = server.tool_list().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name).collect();
+        assert!(names.contains(&"get_symbols"));
+        assert!(names.contains(&"find_symbol"));
+        assert!(names.contains(&"list_symbols"));
     }
 }

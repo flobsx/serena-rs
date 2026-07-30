@@ -56,6 +56,7 @@ tiktoken-rs = "0.6"
 chrono = "0.4"
 regex = "1"
 sysinfo = "0.32"
+tempfile = "3"
 
 # Internal crates
 serena-core       = { path = "crates/serena-core" }

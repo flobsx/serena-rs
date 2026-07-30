@@ -98,7 +98,7 @@ pub fn error_result(message: impl Into<String>) -> rmcp::model::CallToolResult {
 /// Build a `CallToolResult` from JSON.
 pub fn json_result(value: Value) -> rmcp::model::CallToolResult {
     rmcp::model::CallToolResult {
-        content: vec![rmcp::model::Content::json(&value)],
+        content: vec![rmcp::model::Content::json(&value).expect("valid JSON for Content::json")],
         structured_content: Some(value),
         is_error: Some(false),
         meta: None,
@@ -111,28 +111,28 @@ mod tests {
 
     #[test]
     fn test_internal_error_code() {
-        let err = McpError::internal_error("something broke");
+        let err = <McpError as McpErrorExt>::internal_error("something broke");
         assert_eq!(err.code.0, -32603);
         assert_eq!(err.message, "something broke");
     }
 
     #[test]
     fn test_invalid_params_code() {
-        let err = McpError::invalid_params("bad argument");
+        let err = <McpError as McpErrorExt>::invalid_params("bad argument");
         assert_eq!(err.code.0, -32602);
         assert_eq!(err.message, "bad argument");
     }
 
     #[test]
     fn test_method_not_found() {
-        let err = McpError::method_not_found("foo");
+        let err = <McpError as McpErrorExt>::method_not_found("foo");
         assert_eq!(err.code.0, -32601);
         assert!(err.message.contains("foo"));
     }
 
     #[test]
     fn test_tool_not_found() {
-        let err = McpError::tool_not_found("nonexistent");
+        let err = <McpError as McpErrorExt>::tool_not_found("nonexistent");
         assert_eq!(err.code.0, -32602);
         assert!(err.message.contains("nonexistent"));
     }
