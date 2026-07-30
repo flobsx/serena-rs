@@ -73,16 +73,33 @@ is_within_repo() {
 
 # ── build from source ──────────────────────────────────────────────
 build_from_source() {
-  local repo_root
-  repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-
   if ! command -v cargo >/dev/null 2>&1; then
     die "Rust toolchain not found. Install it first: https://rustup.rs"
   fi
 
+  # Running from a local clone?
+  local repo_root=""
+  if [ -f "$(dirname "$0")/../Cargo.toml" ] 2>/dev/null; then
+    repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+  fi
+
+  if [ -z "$repo_root" ]; then
+    # Piped via curl — clone the repo first
+    if ! command -v git >/dev/null 2>&1; then
+      die "git not found — needed to clone the repo for source build"
+    fi
+    repo_root="/tmp/serena-build"
+    rm -rf "$repo_root"
+    info "Cloning flobsx/serena-rs…"
+    git clone --depth 1 "https://github.com/flobsx/serena-rs.git" "$repo_root" 2>&1 | tail -2
+  fi
+
   info "Building Serena.rs from source (this may take a few minutes)…"
   cd "$repo_root"
-  cargo build --release 2>&1 | tail -3
+  cargo build --release 2>&1 | tail -3 || {
+    local rc=$?
+    die "Source build failed (exit $rc). Ensure Rust is up to date: rustup update"
+  }
   ok "Build complete"
 
   mkdir -p "$INSTALL_DIR"
