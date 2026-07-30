@@ -1,0 +1,14 @@
+# Build configuration for Serena.rs
+#
+# NOTE: This .cargo/config.toml is set up for the Hermes build container.
+# On a standard system, just run: sudo apt install build-essential libssl-dev pkg-config
+# Then: cargo build
+
+[build]
+rustflags = []
+
+[env]
+# OpenSSL paths for the Hermes container (extracted debs in /tmp/gcc-prefix)
+# Remove these on a normal system with libssl-dev installed
+OPENSSL_LIB_DIR = "/tmp/gcc-prefix/usr/lib/x86_64-linux-gnu"
+OPENSSL_INCLUDE_DIR = "/tmp/gcc-prefix/usr/include"

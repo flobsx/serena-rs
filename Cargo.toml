@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/serena-core",
+    "crates/serena-mcp",
+    "crates/serena-tools",
+    "crates/serena-lsp",
+    "crates/serena-editor",
+    "crates/serena-project",
+    "crates/serena-memory",
+    "crates/serena-config",
+    "crates/serena-util",
+]
+
+[package]
+name = "serena"
+version = "0.1.0"
+edition = "2024"
+description = "Serena.rs — MCP Toolkit for Coding Agents (Rust rewrite)"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# MCP protocol
+rmcp = "0.8"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+schemars = "0.8"
+
+# LSP types
+lsp-types = "0.95"
+
+# File system & project
+ignore = "0.4"
+walkdir = "2"
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Templates
+tera = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+tiktoken-rs = "0.6"
+chrono = "0.4"
+regex = "1"
+sysinfo = "0.32"
+
+# Internal crates
+serena-core       = { path = "crates/serena-core" }
+serena-mcp        = { path = "crates/serena-mcp" }
+serena-tools      = { path = "crates/serena-tools" }
+serena-lsp        = { path = "crates/serena-lsp" }
+serena-editor     = { path = "crates/serena-editor" }
+serena-project    = { path = "crates/serena-project" }
+serena-memory     = { path = "crates/serena-memory" }
+serena-config     = { path = "crates/serena-config" }
+serena-util       = { path = "crates/serena-util" }
+
+[profile.release]
+opt-level = 2
+debug = false
+strip = "symbols"
+lto = true

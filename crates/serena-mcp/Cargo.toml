@@ -1,0 +1,19 @@
+[package]
+name = "serena-mcp"
+version = "0.1.0"
+edition = "2024"
+description = "Serena.rs — MCP server (stdio/HTTP transport, tool registration, protocol handling)"
+
+[dependencies]
+rmcp = { version = "0.8", features = ["server", "server-side-http", "schemars"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+tracing = "0.1"
+futures = "0.3"
+
+serena-core = { path = "../serena-core" }
+serena-tools = { path = "../serena-tools" }
+serena-util = { path = "../serena-util" }

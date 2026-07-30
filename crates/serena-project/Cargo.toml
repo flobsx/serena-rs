@@ -1,0 +1,16 @@
+[package]
+name = "serena-project"
+version = "0.1.0"
+edition = "2024"
+description = "Serena.rs — Project management, ignore spec, file scanning"
+
+[dependencies]
+ignore = "0.4"
+walkdir = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+serena-util = { path = "../serena-util" }
+
+[dev-dependencies]
+tempfile = "3"
