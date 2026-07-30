@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
 #
-# Serena.rs — One-shot install script
+# Serena.rs — Install script
+#
+# Works with both public AND private GitHub repos.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/maya-bsx/serena-rs/main/scripts/install.sh | sh
+#   # From a local clone (recommended for private repos):
+#   git clone https://github.com/flobsx/serena-rs.git
+#   cd serena-rs && bash scripts/install.sh
+#
+#   # Via curl if the repo is public:
+#   curl -fsSL https://raw.githubusercontent.com/flobsx/serena-rs/main/scripts/install.sh | sh
 #
 # What it does:
-#   1. Downloads the pre-built binary for your platform from GitHub Releases
-#   2. Installs it to ~/.local/bin/serena
+#   1. Builds from source (preferred) OR downloads a pre-built binary
+#   2. Installs to ~/.local/bin/serena
 #   3. Optionally configures OpenCode MCP
-#   4. Prints a summary
 #
 set -euo pipefail
 
 REPO="flobsx/serena-rs"
-VERSION="${1:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 CONFIGURE_OPENCODE="${CONFIGURE_OPENCODE:-yes}"
 
 # ── helpers ────────────────────────────────────────────────────────
-die() { echo >&2 "❌ $*"; exit 1; }
-info() { echo "➡️  $*"; }
-ok()   { echo "✅ $*"; }
+die()   { echo >&2 "❌ $*"; exit 1; }
+info()  { echo "➡️  $*"; }
+ok()    { echo "✅ $*"; }
+warn()  { echo >&2 "⚠️  $*"; }
 
 # ── platform detection ─────────────────────────────────────────────
 detect_platform() {
@@ -44,51 +50,89 @@ detect_platform() {
   echo "${arch}-${os}"
 }
 
+# ── detect if running from within the repo ─────────────────────────
+is_within_repo() {
+  # Check if we're in a scripts/ dir that has Cargo.toml one level up
+  local self_dir
+  self_dir="$(cd "$(dirname "$0")" && pwd 2>/dev/null || echo "")"
+  if [ -n "$self_dir" ] && [ -f "${self_dir}/../Cargo.toml" ]; then
+    return 0  # true
+  fi
+  # Also check if piped (no $0 pointing to a real file)
+  if [ ! -f "$0" ] || [ "$0" = "bash" ] || [ "$0" = "sh" ]; then
+    return 1  # false — piped
+  fi
+  return 1
+}
+
+# ── build from source ──────────────────────────────────────────────
+build_from_source() {
+  local repo_root
+  repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    die "Rust toolchain not found. Install it first: https://rustup.rs"
+  fi
+
+  info "Building Serena.rs from source (this may take a few minutes)…"
+  cd "$repo_root"
+  cargo build --release 2>&1 | tail -3
+  ok "Build complete"
+
+  mkdir -p "$INSTALL_DIR"
+  cp "target/release/serena" "$INSTALL_DIR/serena"
+  ok "Installed to ${INSTALL_DIR}/serena"
+}
+
 # ── download pre-built binary ──────────────────────────────────────
 download_binary() {
   local platform="$1"
-  local url
+  local tmp_dir="/tmp/serena-install"
+  rm -rf "$tmp_dir"
+  mkdir -p "$tmp_dir"
 
-  if [ "$VERSION" = "latest" ]; then
-    url="https://github.com/${REPO}/releases/latest/download/serena-${platform}.tar.gz"
+  local release_tag
+  # Get latest release tag via gh or API
+  if command -v gh >/dev/null 2>&1; then
+    # gh handles auth automatically for both public and private repos
+    info "Downloading Serena.rs for ${platform} via GitHub CLI…"
+    gh release download --repo "$REPO" --pattern "serena-${platform}.tar.gz" --dir "$tmp_dir"
   else
-    url="https://github.com/${REPO}/releases/download/${VERSION}/serena-${platform}.tar.gz"
+    # Try curl with GitHub token (from gh or env)
+    local token=""
+    if command -v gh >/dev/null 2>&1; then
+      token="$(gh auth token 2>/dev/null || true)"
+    fi
+    : "${GITHUB_TOKEN:=${token:-}}"
+
+    local url="https://github.com/${REPO}/releases/download/v0.1.0/serena-${platform}.tar.gz"
+    info "Downloading Serena.rs for ${platform} via curl…"
+
+    if [ -n "$GITHUB_TOKEN" ]; then
+      curl -fsL -H "Authorization: token $GITHUB_TOKEN" "$url" -o "$tmp_dir/serena.tar.gz"
+    else
+      # Public repos only — will 404 on private
+      curl -fsL "$url" -o "$tmp_dir/serena.tar.gz"
+    fi
   fi
 
-  info "Downloading Serena.rs for ${platform}…"
-  mkdir -p /tmp/serena-install
-  cd /tmp/serena-install
-
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o serena.tar.gz
-  elif command -v wget >/dev/null 2>&1; then
-    wget -q "$url" -O serena.tar.gz
-  else
-    die "neither curl nor wget found — install one of them first"
+  if [ ! -f "$tmp_dir/serena.tar.gz" ]; then
+    # Download failed — fall back to source build
+    warn "Pre-built binary download failed. Trying source build…"
+    cd "$(dirname "$0")/.." 2>/dev/null || die "Cannot find repo root"
+    build_from_source
+    return
   fi
 
+  cd "$tmp_dir"
   tar xzf serena.tar.gz
-  if [ ! -f serena ]; then
-    die "downloaded archive doesn't contain 'serena' binary"
-  fi
-
+  [ -f serena ] || die "archive doesn't contain 'serena' binary"
   chmod +x serena
-}
 
-# ── install binary ─────────────────────────────────────────────────
-install_binary() {
   mkdir -p "$INSTALL_DIR"
-
-  # Move binary
-  mv /tmp/serena-install/serena "$INSTALL_DIR/serena"
-
-  # Test
-  if ! "$INSTALL_DIR/serena" --version >/dev/null 2>&1; then
-    die "installed binary doesn't run — corrupted download?"
-  fi
-
+  mv serena "$INSTALL_DIR/serena"
   ok "Installed to ${INSTALL_DIR}/serena"
-  rm -rf /tmp/serena-install
+  rm -rf "$tmp_dir"
 }
 
 # ── configure OpenCode MCP ─────────────────────────────────────────
@@ -96,71 +140,60 @@ configure_opencode() {
   local config_dir="${HOME}/.config/opencode"
   local config_file="${config_dir}/opencode.json"
 
-  if [ ! -d "$config_dir" ]; then
-    info "OpenCode config dir not found — skipping MCP configuration"
-    return
-  fi
+  [ -d "$config_dir" ] || { info "OpenCode config dir not found — skipping MCP config"; return; }
 
-  # Read existing config or create new one
-  local tmp
-  tmp=$(mktemp)
+  local tmp; tmp=$(mktemp)
+  [ -f "$config_file" ] && cp "$config_file" "$tmp" || echo '{}' > "$tmp"
 
-  if [ -f "$config_file" ]; then
-    cp "$config_file" "$tmp"
-  else
-    echo '{}' > "$tmp"
-  fi
-
-  # Inject serena-rs MCP server using python3 (available everywhere)
-  # If python3 is not available, fall back to a simpler jq-less approach
   if command -v python3 >/dev/null 2>&1; then
     BINARY_PATH="${INSTALL_DIR}/serena"
     python3 -c "
-import json, sys
-with open('$tmp') as f:
-    cfg = json.load(f)
-cfg.setdefault('mcp', {})['serena-rs'] = {
-    'type': 'local',
-    'command': ['${BINARY_PATH}', 'start-mcp-server']
-}
-with open('$tmp', 'w') as f:
-    json.dump(cfg, f, indent=2)
-"
-    cp "$tmp" "$config_file"
-    ok "OpenCode MCP server 'serena-rs' configured in ${config_file}"
+import json
+with open('$tmp') as f: cfg = json.load(f)
+cfg.setdefault('mcp', {})['serena-rs'] = {'type': 'local', 'command': ['${BINARY_PATH}', 'start-mcp-server']}
+with open('$tmp', 'w') as f: json.dump(cfg, f, indent=2, default=str)
+" && cp "$tmp" "$config_file" && ok "OpenCode MCP 'serena-rs' configured"
   else
-    warn "python3 not found — add this to ${config_file} manually:
+    warn "Add to ${config_file} manually:
 
   \"serena-rs\": {
     \"type\": \"local\",
     \"command\": [\"${INSTALL_DIR}/serena\", \"start-mcp-server\"]
-  }
-"
+  }"
   fi
   rm -f "$tmp"
 }
 
 # ── print summary ──────────────────────────────────────────────────
 print_summary() {
-  local version
-  version=$("$INSTALL_DIR/serena" --version 2>&1 | head -1)
+  local version=""
+  version=$("$INSTALL_DIR/serena" --version 2>&1 | head -1) || true
 
   echo ""
   echo "┌──────────────────────────────────────────┐"
   echo "│         🦀  Serena.rs  installed         │"
   echo "├──────────────────────────────────────────┤"
   echo "│  Binary:  ${INSTALL_DIR}/serena"
-  echo "│  Version: ${version}"
-  if [ "$CONFIGURE_OPENCODE" = "yes" ]; then
-    echo "│  MCP:     configured for OpenCode         │"
-  fi
+  [ -n "$version" ] && echo "│  Version: ${version}"
   echo "│                                          │"
   echo "│  Usage:                                   │"
   echo "│    serena --help                          │"
   echo "│    serena start-mcp-server                │"
   echo "│                                          │"
-  echo "│  Restart OpenCode and type /mcp to verify │"
+  if [ "$CONFIGURE_OPENCODE" = "yes" ]; then
+    echo "│  Restart OpenCode and type /mcp to check │"
+  fi
   echo "└──────────────────────────────────────────┘"
+}
+
+# ── check for Rust toolchain and suggest cargo install ─────────────
+suggest_cargo_install() {
+  if command -v cargo >/dev/null 2>&1; then
+    echo ""
+    info "Alternatively, install directly from GitHub:"
+    echo "  cargo install --git https://github.com/${REPO}.git"
+    echo ""
+  fi
 }
 
 # ── main ───────────────────────────────────────────────────────────
@@ -168,15 +201,23 @@ main() {
   echo "  🦀  Serena.rs — MCP Toolkit for Coding Agents"
   echo ""
 
-  local platform
-  platform=$(detect_platform)
+  if is_within_repo; then
+    info "Running from local clone — building from source"
+    build_from_source
+  else
+    local platform
+    platform=$(detect_platform)
+    download_binary "$platform"
 
-  download_binary "$platform"
-  install_binary
+    # Verify binary works
+    if ! "$INSTALL_DIR/serena" --version >/dev/null 2>&1; then
+      die "installed binary doesn't run"
+    fi
+  fi
 
-  # Add to PATH if needed
+  # PATH hint
   if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-    info "Add ${INSTALL_DIR} to your PATH (e.g. in ~/.bashrc / ~/.zshrc):"
+    info "Add ${INSTALL_DIR} to your PATH (~/.bashrc / ~/.zshrc):"
     echo "  export PATH=\"\$PATH:${INSTALL_DIR}\""
   fi
 
@@ -185,6 +226,7 @@ main() {
   fi
 
   print_summary
+  suggest_cargo_install
 }
 
 main
